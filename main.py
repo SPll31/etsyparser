@@ -1,5 +1,4 @@
 import asyncio
-import time
 import itertools
 from playwright.async_api import async_playwright
 import re
@@ -11,27 +10,36 @@ from PIL import Image as PILImage
 import httpx
 
 
+# Функция для создания таблицы (xlsx файла) из данных от EtsyClient.
+# Параметры:
+# data - данные от EtsyClient.
+# filename - название выходного файла.
+# image_size - размер изображения в пикселях, рекомендуется менее 800.
+
 def create_xlsx(data, filename, image_size=(100, 100)):
+    # Открытие таблицы
     wb = openpyxl.Workbook()
     ws = wb.active
 
+    # Добавление информации в таблицу
     for word, items in data.items():
-        # Добавляем слово как заголовок
+        # Добавление ключевого слова
         ws.append([word])
         ws.merge_cells(start_row=ws.max_row, start_column=1,
                        end_row=ws.max_row, end_column=3)
         ws.cell(row=ws.max_row,
-                column=1).font = openpyxl.styles.Font(size=20, bold=True)
+                column=1).font = openpyxl.styles.Font(size=14, bold=True)
 
+        # Добавление всех листингов для одного ключевого слова
         for item in items:
             row = ["", item["index"], item["listing_id"]]
             ws.append(row)
 
+            # Изменение размера изображения
             img_data = BytesIO(item["image_data"])
             pil_img = PILImage.open(img_data)
             pil_img = pil_img.resize(image_size)
 
-            # Преобразуем PIL изображение в объект BytesIO
             img_byte_arr = BytesIO()
             pil_img.save(img_byte_arr, format='PNG')
             img_byte_arr.seek(0)
@@ -41,7 +49,7 @@ def create_xlsx(data, filename, image_size=(100, 100)):
             img.anchor = f"A{ws.max_row}"
             ws.add_image(img)
 
-            # Подгоняем высоту строки под изображение
+            # Подгоняем высоту и ширину строк под изображение
             image_height = img.height
             row_height = image_height * 0.75
             ws.row_dimensions[ws.max_row].height = row_height
@@ -50,28 +58,21 @@ def create_xlsx(data, filename, image_size=(100, 100)):
             ws.column_dimensions[column].width = image_size[0] * 0.075 * 2
         ws.append([])
 
+    # Сохранение таблицы в файл
     wb.save(filename)
 
 
+def split_list(lst, chunk_size=3):
+    return [lst[i:i + chunk_size] for i in range(0, len(lst), chunk_size)]
+
+
+# Основной URL
 MAIN_URL = "https://www.etsy.com"
 
 
+# Класс для работы с Etsy
 class EtsyClient():
-    @staticmethod
-    def get_images_links(srcset):
-        if not srcset:
-            return {}
-
-        pattern = re.compile(r'(\d+)w')
-        image_links = {}
-        for entry in srcset.split(','):
-            url, width = entry.strip().rsplit(' ', 1)
-            match = pattern.search(width)
-            if match:
-                image_links[match.group(1)] = url
-
-        return image_links
-
+    # Функция для создание хедера Cookie
     async def get_cookie_header(self):
         cookies = await self._context.cookies()
 
@@ -79,26 +80,37 @@ class EtsyClient():
                                     for cookie in cookies])
         return cookies_header
 
-    def __init__(self, shop_name, language, currency, image_size,
-                 region, max_page, file, req_cooldown):
+    # Конструктор класса.
+    # Параметры:
+    # shop_name - Название магазина.
+    # language - Код языка.
+    # currency - Код валюты.
+    # region - Двухсимвольный код страны.
+    # max_page - Глубина сканирования. (Кол-во страниц)
+    # file - .txt Файл с ключевыми словами
+    def __init__(self, shop_name, language, currency, region, max_page, file, req_cooldown):
+
         self._max_page = max_page
-        self._req_cooldown = req_cooldown
         self._shop_name = shop_name
         self._language = language
         self._region = region
         self._currency = currency
-        self._image_size = image_size
+        self._req_cooldown = req_cooldown
 
+        # Открытие файла с ключевыми словами
         try:
             with open(file, "r") as f:
                 self._words = f.readlines()
         except Exception:
             raise Exception(f"Во время загрузки файла {file} произошла ошибка")
 
+    # Функция для создания браузерной сессии на Etsy
     async def init_browser(self):
-        playwright = await async_playwright().start()
-        browser = await playwright.chromium.launch(headless=True)
+        # Запуск браузера
+        self._playwright = await async_playwright().start()
+        self._browser = await self._playwright.chromium.launch(headless=True)
 
+        # Хедеры для всего соединения
         headers = {
             "Accept": ("text/html,application/xhtml+xml,application/xml;"
                        "q=0.9,image/avif,image/webp,image/apng,*/*;"
@@ -118,6 +130,7 @@ class EtsyClient():
                           '"Chromium";v="131", "Not_A Brand";v="24"'),
             "Sec-Ch-Ua-Arch": '"x86"',
             "Sec-Ch-Ua-Bitness": '"64"',
+            "Cookie": "datadome=him6dx84siIhR6S1upai1lL4YrNXe8TD7BqCteeiXNwjGLo1nHAPW~iuTFkZV6DD53xApcadAGk3CDFacql~L9SVXu6GoFicn_v4dNuLE8wjaHJIkaY9h1MyjVttaSOI",
             "Sec-Ch-Ua-Full-Version-List": ('"Microsoft Edge";'
                                             'v="131.0.2903.99", '
                                             '"Chromium";'
@@ -133,7 +146,7 @@ class EtsyClient():
             "Upgrade-Insecure-Requests": "1",
         }
 
-        self._context = await browser.new_context(
+        self._context = await self._browser.new_context(
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 "
@@ -143,11 +156,13 @@ class EtsyClient():
             extra_http_headers=headers
         )
 
+        # Открытие страницы для получения куки от капчи
         page = await self._context.new_page()
         await page.goto(MAIN_URL)
         await page.wait_for_load_state('networkidle')
         await page.close()
 
+        # Открытие страницы для получения специальных токенов
         page = await self._context.new_page()
         await page.goto(MAIN_URL)
         await page.wait_for_load_state('networkidle')
@@ -171,6 +186,9 @@ class EtsyClient():
                 self._page_guid = page_guid_match.group(1)
                 break
 
+        await page.close()
+
+        # Хедеры для api запросов
         self._api_headers = {
             **headers,
             "accept": "*/*",
@@ -185,6 +203,7 @@ class EtsyClient():
             "cookie": await self.get_cookie_header(),
         }
 
+        # Смена языка
         api = self._context.request
         await api.post(f"{MAIN_URL}/api/v3/ajax/member/locale-preferences",
                        headers=self._api_headers, data={
@@ -193,6 +212,10 @@ class EtsyClient():
                             "region": self._region
                         })
 
+    # Функция для получения данных с одной страницы по одному ключевому слову
+    # Параметры:
+    # page - Номер страницы.
+    # word - Ключевое слово.
     async def get_data_from_page(self, page, word):
         locale_header = f"{self._currency}|{self._language}|{self._region}"
         self._api_headers = {
@@ -228,8 +251,8 @@ class EtsyClient():
                                 "q": word,
                                 "page": page,
                                 "ref": "pagination",
-                                "referrer": (f"{MAIN_URL}/uk/search?q={word}&page={page}"
-                                             "&ref=search_bar"),
+                                "referrer": (f"{MAIN_URL}/uk/search?q={word}"
+                                             f"&page={page}&ref=search_bar"),
                                 "is_prefetch": True,
                                 "placement": "wsg"
                             },
@@ -243,6 +266,7 @@ class EtsyClient():
             "runtime_analysis": False
         }
 
+        # Отправка запроса для получения результатов поиска
         api = self._context.request
         api_path = "/api/v3/ajax/bespoke/member/neu/specs/async_search_results"
         api_url = MAIN_URL + api_path
@@ -252,37 +276,44 @@ class EtsyClient():
             headers=self._api_headers,
 
         )
+        print(response.headers)
 
         data = await response.json()
+        print(data.keys())
         html_data = data["output"]["async_search_results"]
+        with open("content.html", "wb") as f:
+            f.write(html_data.encode("utf-8"))
         soup = BeautifulSoup(html_data, "html.parser")
 
+        # Получение всех листингов
         listings = soup.select("a.listing-link")
-        if page == 1:
-            listings = listings[:-6]
+        listings = listings[:-6] if page == 1 else listings
 
-        listings_filtered = list(filter(
-            lambda listing: listing.text.find(self._shop_name) != -1,
-            listings))
+        # Фильтрация листингов по названию магазина
+        listings_filtered = [listing for listing in listings
+                             if self._shop_name in listing.text]
 
-        listings_data = []
-
+        # Инициализация клиента для открытия изображений
         client = httpx.AsyncClient()
 
+        # Функция для получения информации об одном листинге
         async def get_listing_data(listing):
             num = listings.index(listing)
             row = num // 4 + 1
             listing_id = listing["data-listing-id"]
             image = listing.select_one("img.wt-image")
 
-            if not image:
-                return {}
-
-            links = self.get_images_links(image["srcset"])
-            image_link = links.get(self._image_size, list(links.values())[0])
+            # Получение ссылки на изображение с лучшим качеством
+            links = image["srcset"]
+            image_link = links.split(", ")[-1].split(" ")[0]
             index = f"{page}.{row:02d}"
 
-            image_data = await client.get(image_link)
+            for i in range(10):
+                try:
+                    image_data = await client.get(image_link)
+                    break
+                except Exception:
+                    continue
 
             return {
                 "image_data": image_data.content,
@@ -299,30 +330,33 @@ class EtsyClient():
         full_data = {}
 
         for word in self._words:
-            tasks = [self.get_data_from_page(page, word)
-                     for page in range(1, self._max_page+1)]
+            word_data = []
+            for splited in split_list(list(range(1, self._max_page + 1))):
+                print(splited)
+                tasks = [self.get_data_from_page(page, word)
+                         for page in splited]
 
-            word_data = list(itertools.chain(*await asyncio.gather(*tasks)))
+                word_data += list(itertools.chain(
+                    *await asyncio.gather(*tasks)))
 
-            full_data = {
-                **full_data,
-                word: word_data
-            }
+                await asyncio.sleep(self._req_cooldown)
+            full_data[word] = word_data
 
         return full_data
 
+    # Закрытие соединения
     async def close_client(self):
         await self._context.close()
+        await self._browser.close()
+        await self._playwright.stop()
 
 
 async def main():
-    t = time.time()
-    etsy = EtsyClient("IDlingerieUK", "en-GB", "GBP", '300',
-                      "GB", 3, "test.txt", 10)
+    etsy = EtsyClient("IDlingerieUK", "en-GB", "GBP",
+                      "GB", 3, "test.txt", 0)
     await etsy.init_browser()
     data = await etsy.get_data_full()
     await etsy.close_client()
     create_xlsx(data, "test.xlsx")
-    print(len(data), time.time()-t)
 
 asyncio.run(main())
