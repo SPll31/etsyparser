@@ -130,7 +130,7 @@ class EtsyClient():
                           '"Chromium";v="131", "Not_A Brand";v="24"'),
             "Sec-Ch-Ua-Arch": '"x86"',
             "Sec-Ch-Ua-Bitness": '"64"',
-            "Cookie": "datadome=him6dx84siIhR6S1upai1lL4YrNXe8TD7BqCteeiXNwjGLo1nHAPW~iuTFkZV6DD53xApcadAGk3CDFacql~L9SVXu6GoFicn_v4dNuLE8wjaHJIkaY9h1MyjVttaSOI",
+            "Cookie": "",
             "Sec-Ch-Ua-Full-Version-List": ('"Microsoft Edge";'
                                             'v="131.0.2903.99", '
                                             '"Chromium";'
